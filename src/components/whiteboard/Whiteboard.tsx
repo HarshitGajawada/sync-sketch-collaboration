@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Canvas as FabricCanvas } from "fabric";
+import { supabase } from "@/integrations/supabase/client";
 import { WhiteboardCanvas } from "./WhiteboardCanvas";
 import { Toolbar } from "./Toolbar";
 import { ChatWindow } from "./ChatWindow";
 import { StickyNote } from "./StickyNote";
+import { BoardSelector } from "./BoardSelector";
+import { BoardMembers } from "./BoardMembers";
 import { toast } from "sonner";
 
 export interface StickyNoteData {
@@ -20,6 +23,96 @@ export const Whiteboard = () => {
   const [fabricCanvas, setFabricCanvas] = useState<FabricCanvas | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [stickyNotes, setStickyNotes] = useState<StickyNoteData[]>([]);
+  const [currentBoardId, setCurrentBoardId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check URL for board parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const boardParam = urlParams.get('board');
+    if (boardParam) {
+      setCurrentBoardId(boardParam);
+      handleJoinBoard(boardParam);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentBoardId) {
+      loadBoardData();
+      saveBoardData();
+    }
+  }, [currentBoardId, stickyNotes, fabricCanvas]);
+
+  const handleJoinBoard = async (boardId: string) => {
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        toast.error("Please log in to join the board");
+        return;
+      }
+
+      // Add user as member if not already
+      const { error } = await supabase
+        .from('board_members')
+        .upsert({
+          board_id: boardId,
+          user_id: userData.user.id,
+          role: 'editor'
+        });
+
+      if (error && !error.message.includes('duplicate')) {
+        throw error;
+      }
+
+      toast.success("Joined board successfully!");
+    } catch (error) {
+      console.error('Error joining board:', error);
+      toast.error("Failed to join board");
+    }
+  };
+
+  const loadBoardData = async () => {
+    if (!currentBoardId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('boards')
+        .select('canvas_data, sticky_notes')
+        .eq('id', currentBoardId)
+        .single();
+
+      if (error) throw error;
+
+      if (data.sticky_notes && Array.isArray(data.sticky_notes)) {
+        setStickyNotes(data.sticky_notes as unknown as StickyNoteData[]);
+      }
+
+      if (data.canvas_data && fabricCanvas && typeof data.canvas_data === 'object') {
+        fabricCanvas.loadFromJSON(data.canvas_data as Record<string, any>, () => {
+          fabricCanvas.renderAll();
+        });
+      }
+    } catch (error) {
+      console.error('Error loading board data:', error);
+    }
+  };
+
+  const saveBoardData = async () => {
+    if (!currentBoardId || !fabricCanvas) return;
+
+    try {
+      const canvasData = fabricCanvas.toJSON();
+      
+      await supabase
+        .from('boards')
+        .update({
+          canvas_data: canvasData,
+          sticky_notes: stickyNotes as any
+        })
+        .eq('id', currentBoardId);
+    } catch (error) {
+      console.error('Error saving board data:', error);
+    }
+  };
 
   const handleCanvasReady = (canvas: FabricCanvas) => {
     setFabricCanvas(canvas);
@@ -70,48 +163,67 @@ export const Whiteboard = () => {
   };
 
   return (
-    <div className="h-screen bg-gradient-to-br from-background via-canvas-bg to-muted flex overflow-hidden">
-      {/* Toolbar */}
-      <Toolbar
-        activeTool={activeTool}
-        onToolChange={setActiveTool}
-        activeColor={activeColor}
-        onColorChange={setActiveColor}
-        brushSize={brushSize}
-        onBrushSizeChange={setBrushSize}
-        fabricCanvas={fabricCanvas}
-        onAddStickyNote={handleAddStickyNote}
-        onAddImage={handleAddImage}
-      />
+    <div className="h-screen bg-gradient-to-br from-background via-canvas-bg to-muted flex flex-col overflow-hidden">
+      {/* Header with Board Controls */}
+      <div className="flex items-center justify-between border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <BoardSelector
+          currentBoardId={currentBoardId}
+          onBoardChange={setCurrentBoardId}
+        />
+        <BoardMembers boardId={currentBoardId} />
+      </div>
 
-      {/* Canvas Area */}
-      <div className="flex-1 relative">
-        <WhiteboardCanvas
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Toolbar */}
+        <Toolbar
           activeTool={activeTool}
+          onToolChange={setActiveTool}
           activeColor={activeColor}
+          onColorChange={setActiveColor}
           brushSize={brushSize}
-          onCanvasReady={handleCanvasReady}
+          onBrushSizeChange={setBrushSize}
+          fabricCanvas={fabricCanvas}
+          onAddStickyNote={handleAddStickyNote}
+          onAddImage={handleAddImage}
         />
 
-        {/* Sticky Notes */}
-        {stickyNotes.map(note => (
-          <StickyNote
-            key={note.id}
-            id={note.id}
-            text={note.text}
-            color={note.color}
-            position={note.position}
-            onUpdate={handleUpdateStickyNote}
-            onDelete={handleDeleteStickyNote}
-            onMove={handleMoveStickyNote}
+        {/* Canvas Area */}
+        <div className="flex-1 relative">
+          <WhiteboardCanvas
+            activeTool={activeTool}
+            activeColor={activeColor}
+            brushSize={brushSize}
+            onCanvasReady={handleCanvasReady}
           />
-        ))}
 
-        {/* Chat Window */}
-        <ChatWindow
-          isOpen={isChatOpen}
-          onToggle={() => setIsChatOpen(!isChatOpen)}
-        />
+          {/* Sticky Notes - lower z-index than chat */}
+          <div className="absolute inset-0 pointer-events-none z-10">
+            {stickyNotes.map(note => (
+              <div key={note.id} className="pointer-events-auto">
+                <StickyNote
+                  id={note.id}
+                  text={note.text}
+                  color={note.color}
+                  position={note.position}
+                  onUpdate={handleUpdateStickyNote}
+                  onDelete={handleDeleteStickyNote}
+                  onMove={handleMoveStickyNote}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Chat Window - higher z-index */}
+          <div className="absolute inset-0 pointer-events-none z-20">
+            <div className="pointer-events-auto">
+              <ChatWindow
+                isOpen={isChatOpen}
+                onToggle={() => setIsChatOpen(!isChatOpen)}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

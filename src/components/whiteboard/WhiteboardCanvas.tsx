@@ -89,12 +89,13 @@ export const WhiteboardCanvas = ({
       });
       fabricCanvas.add(circle);
     } else if (activeTool === "text") {
-      const text = new FabricText("Click to edit", {
+      const text = new FabricText("Double click to edit", {
         left: pointer.x,
         top: pointer.y,
         fill: activeColor,
         fontSize: 20,
         fontFamily: "Inter, sans-serif",
+        editable: true,
       });
       fabricCanvas.add(text);
       fabricCanvas.setActiveObject(text);
@@ -104,10 +105,21 @@ export const WhiteboardCanvas = ({
   useEffect(() => {
     if (!fabricCanvas) return;
 
+    const handleDoubleClick = (e: any) => {
+      const target = e.target;
+      if (target && target.type === 'text') {
+        target.set({ editable: true });
+        fabricCanvas.setActiveObject(target);
+        fabricCanvas.renderAll();
+      }
+    };
+
     fabricCanvas.on('mouse:down', handleCanvasClick);
+    fabricCanvas.on('mouse:dblclick', handleDoubleClick);
 
     return () => {
       fabricCanvas.off('mouse:down', handleCanvasClick);
+      fabricCanvas.off('mouse:dblclick', handleDoubleClick);
     };
   }, [fabricCanvas, activeTool, activeColor]);
 
