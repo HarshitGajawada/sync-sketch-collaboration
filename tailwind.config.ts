@@ -52,6 +52,17 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
+				// Sync Sketch specific colors
+				'canvas-bg': 'hsl(var(--canvas-bg))',
+				'toolbar-bg': 'hsl(var(--toolbar-bg))',
+				'toolbar-shadow': 'hsl(var(--toolbar-shadow))',
+				'tool-active': 'hsl(var(--tool-active))',
+				'tool-hover': 'hsl(var(--tool-hover))',
+				'sticky-yellow': 'hsl(var(--sticky-yellow))',
+				'sticky-pink': 'hsl(var(--sticky-pink))',
+				'sticky-blue': 'hsl(var(--sticky-blue))',
+				'sticky-green': 'hsl(var(--sticky-green))',
+				'chat-bg': 'hsl(var(--chat-bg))',
 				sidebar: {
 					DEFAULT: 'hsl(var(--sidebar-background))',
 					foreground: 'hsl(var(--sidebar-foreground))',
