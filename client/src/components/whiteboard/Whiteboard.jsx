@@ -37,63 +37,33 @@ export const Whiteboard = () => {
   }, [boardId]);
 
   useEffect(() => {
-    if (socket && boardId && currentBoardRef.current !== boardId) {
-      console.log('Setting up socket listeners for board:', boardId);
-      
-      // Leave previous board if any
-      if (currentBoardRef.current) {
-        console.log('Leaving previous board:', currentBoardRef.current);
-        socket.emit('leave-board', currentBoardRef.current);
-      }
-      
-      // Join new board room
-      socket.emit('join-board', boardId);
-      currentBoardRef.current = boardId;
-      
-      // Test if socket is connected
-      console.log('Socket connected:', socket.connected);
-      console.log('Socket ID:', socket.id);
+    if (!socket || !boardId) return;
 
-      // Listen for real-time events (only set up once)
-      socket.off('canvas-update'); // Remove any existing listeners
-      socket.off('sticky-note-add');
-      socket.off('sticky-note-update');
-      socket.off('sticky-note-delete');
-      socket.off('user-joined');
-      socket.off('user-left');
-      socket.off('room-users');
-      socket.off('test-response');
-      socket.off('test-canvas-response');
-
-      socket.on('canvas-update', handleCanvasUpdate);
-      socket.on('sticky-note-add', handleStickyNoteAdd);
-      socket.on('sticky-note-update', handleStickyNoteUpdate);
-      socket.on('sticky-note-delete', handleStickyNoteDelete);
-      socket.on('user-joined', handleUserJoined);
-      socket.on('user-left', handleUserLeft);
-      socket.on('room-users', (users) => {
-        console.log('Room users updated:', users.map(u => u.username));
-        setRoomUsers(users);
-      });
-      
-      // Test socket connection
-      socket.emit('test-connection', { boardId, message: 'Hello from client' });
-      socket.on('test-response', (data) => {
-        console.log('✅ Test response from server:', data.message);
-      });
-      
-      socket.on('test-canvas-response', (data) => {
-        console.log('✅ Test canvas response:', data.message);
-        toast.success(`Socket test received: ${data.message}`);
-      });
-    }
+    // Join board room
+    socket.emit('join-board', boardId);
+    currentBoardRef.current = boardId;
+    
+    // Set up event listeners
+    socket.on('canvas-update', handleCanvasUpdate);
+    socket.on('sticky-note-add', handleStickyNoteAdd);
+    socket.on('sticky-note-update', handleStickyNoteUpdate);
+    socket.on('sticky-note-delete', handleStickyNoteDelete);
+    socket.on('user-joined', handleUserJoined);
+    socket.on('user-left', handleUserLeft);
+    socket.on('room-users', setRoomUsers);
 
     return () => {
-      if (currentBoardRef.current) {
-        console.log('Component unmounting, leaving board:', currentBoardRef.current);
-        socket?.emit('leave-board', currentBoardRef.current);
-        currentBoardRef.current = null;
-      }
+      console.log('🔌 Cleaning up socket for board:', boardId);
+      socket.off('canvas-update', handleCanvasUpdate);
+      socket.off('sticky-note-add', handleStickyNoteAdd);
+      socket.off('sticky-note-update', handleStickyNoteUpdate);
+      socket.off('sticky-note-delete', handleStickyNoteDelete);
+      socket.off('user-joined', handleUserJoined);
+      socket.off('user-left', handleUserLeft);
+      socket.off('room-users', setRoomUsers);
+      
+      socket.emit('leave-board', boardId);
+      currentBoardRef.current = null;
     };
   }, [socket, boardId]);
 
@@ -181,15 +151,10 @@ export const Whiteboard = () => {
       console.log('Setting up canvas event listeners with socket');
       
       const handlePathCreated = (e) => {
-        console.log('🎨 Path created event fired');
-        console.log('Socket connected:', socket.connected);
-        console.log('isReceivingUpdate:', isReceivingUpdateRef.current);
-        
         if (!isReceivingUpdateRef.current) {
           // Assign unique ID to the path
           e.path.id = Date.now() + Math.random();
           
-          console.log('📡 Broadcasting path created by local user');
           socket.emit('canvas-update', {
             boardId,
             type: 'path:created',
@@ -205,7 +170,6 @@ export const Whiteboard = () => {
             e.target.id = Date.now() + Math.random();
           }
           
-          console.log('📡 Broadcasting object added by local user:', e.target.type);
           socket.emit('canvas-update', {
             boardId,
             type: 'object:added',
@@ -216,7 +180,6 @@ export const Whiteboard = () => {
 
       const handleObjectModified = (e) => {
         if (e.target.id && !isReceivingUpdateRef.current) {
-          console.log('📡 Broadcasting object modified by local user');
           socket.emit('canvas-update', {
             boardId,
             type: 'object:modified',
@@ -245,7 +208,6 @@ export const Whiteboard = () => {
   const handleCanvasUpdate = (data) => {
     if (!fabricCanvas) return;
 
-    console.log('Received canvas update:', data.type, 'from user:', data.username);
     isReceivingUpdateRef.current = true;
 
     // Handle different types of canvas updates from other users
@@ -420,38 +382,7 @@ export const Whiteboard = () => {
             <Share2 className="h-4 w-4 mr-2" />
             Share: {board?.shareCode}
           </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => {
-              console.log('Testing canvas sync...');
-              if (socket && fabricCanvas) {
-                // Add a test rectangle and broadcast it
-                import('fabric').then(({ Rect }) => {
-                  const testRect = new Rect({
-                    left: 100,
-                    top: 100,
-                    fill: 'red',
-                    width: 50,
-                    height: 50,
-                    id: Date.now() + Math.random()
-                  });
-                  
-                  fabricCanvas.add(testRect);
-                  
-                  socket.emit('canvas-update', {
-                    boardId,
-                    type: 'object:added',
-                    data: testRect.toObject()
-                  });
-                  
-                  console.log('Test rectangle added and broadcasted');
-                });
-              }
-            }}
-          >
-            Test Canvas Sync
-          </Button>
+
           <BoardMembers users={roomUsers} />
         </div>
       </div>

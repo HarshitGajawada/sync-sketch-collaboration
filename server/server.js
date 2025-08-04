@@ -26,7 +26,8 @@ app.use(cors({
   origin: process.env.CLIENT_URL || "http://localhost:5173",
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
 
 // Health check endpoint
@@ -126,17 +127,11 @@ io.on('connection', (socket) => {
 
   // Canvas drawing events
   socket.on('canvas-update', (data) => {
-    console.log(`📡 RECEIVED canvas-update: ${data.type} from ${socket.username} for board ${data.boardId}`);
+    console.log(`📡 Received canvas-update: ${data.type} from ${socket.username}`);
 
-    // Check how many users are in the room
+    // Check room size
     const roomSize = boardRooms.get(data.boardId)?.size || 0;
-    console.log(`📊 Board ${data.boardId} has ${roomSize} users, broadcasting to ${roomSize - 1} others`);
-
-    // List all users in the room
-    const roomUsers = Array.from(boardRooms.get(data.boardId) || [])
-      .map(socketId => activeUsers.get(socketId))
-      .filter(Boolean);
-    console.log(`👥 Users in room:`, roomUsers.map(u => u.username));
+    console.log(`📊 Room ${data.boardId} has ${roomSize} users`);
 
     // Add the sender's info and relay to other users in the room
     const updateData = {
@@ -145,9 +140,8 @@ io.on('connection', (socket) => {
       username: socket.username
     };
 
-    console.log(`📤 Broadcasting to room ${data.boardId}`);
     socket.to(data.boardId).emit('canvas-update', updateData);
-    console.log(`✅ Broadcast complete`);
+    console.log(`📤 Broadcasted to ${roomSize - 1} other users in room ${data.boardId}`);
   });
 
   // Sticky note events
@@ -212,21 +206,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Test connection
-  socket.on('test-connection', (data) => {
-    console.log(`Test connection from ${socket.username}:`, data.message);
-    socket.emit('test-response', { message: 'Server received your test' });
-  });
 
-  socket.on('test-canvas', (data) => {
-    console.log(`🧪 Test canvas from ${socket.username}:`, data.message);
-    console.log(`🧪 Broadcasting test to room ${data.boardId}`);
-    socket.to(data.boardId).emit('test-canvas-response', {
-      message: `Test from ${socket.username}`,
-      boardId: data.boardId
-    });
-    console.log(`🧪 Test broadcast complete`);
-  });
 
   // Handle disconnection
   socket.on('disconnect', () => {
