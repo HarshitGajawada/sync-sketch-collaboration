@@ -151,6 +151,7 @@ export const Whiteboard = () => {
       console.log('Setting up canvas event listeners with socket');
       
       const handlePathCreated = (e) => {
+        console.log('🎨 Broadcasting canvas update, socket:', !!socket, 'boardId:', boardId);
         if (!isReceivingUpdateRef.current) {
           // Assign unique ID to the path
           e.path.id = Date.now() + Math.random();
@@ -206,6 +207,7 @@ export const Whiteboard = () => {
   }, [fabricCanvas, socket, boardId]);
 
   const handleCanvasUpdate = (data) => {
+    console.log('📥 Received canvas update:', data.type);
     if (!fabricCanvas) return;
 
     isReceivingUpdateRef.current = true;
