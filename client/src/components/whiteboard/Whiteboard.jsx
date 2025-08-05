@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef , useCallback} from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Canvas as FabricCanvas } from "fabric";
+import { Path } from 'fabric';  // Force Path class to register
+fabric.Path = Path; 
 import { WhiteboardCanvas } from "./WhiteboardCanvas";
 import { Toolbar } from "./Toolbar";
 import { ChatWindow } from "./ChatWindow";
@@ -24,6 +26,7 @@ export const Whiteboard = () => {
   const [fabricCanvas, setFabricCanvas] = useState(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [stickyNotes, setStickyNotes] = useState([]);
+  const [pendingCanvasUpdates, setPendingCanvasUpdates] = useState([]);
   const [board, setBoard] = useState(null);
   const [roomUsers, setRoomUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,14 +39,107 @@ export const Whiteboard = () => {
     }
   }, [boardId]);
 
+  const handleCanvasUpdate = useCallback((data) => {
+    if (!fabricCanvas) {
+      console.warn("⚠️ Canvas not ready. Queuing update:", data);
+      setPendingCanvasUpdates(prev => [...prev, data]);
+      return;
+    }
+  
+    applyCanvasUpdate(data);
+  }, [fabricCanvas]);
+  
+
+  const applyCanvasUpdate = useCallback((data) => {
+    console.log('📥 Received canvas update:', data.type);
+    if (!fabricCanvas) return;
+
+    isReceivingUpdateRef.current = true;
+
+    // Handle different types of canvas updates from other users
+    switch (data.type) {
+      case 'path:created':
+      case 'object:added':
+        console.log("📥 Received canvas update:", data.type);
+        console.log("🔎 Raw object data:", data.data);
+
+        import('fabric').then((fabric) => {
+          try {
+            console.log("📦 Fabric module loaded");
+
+            const { util } = fabric;
+
+            console.log("🔎 Object type:", data.data?.type);
+            console.log("🧩 Object keys:", Object.keys(data.data));
+
+            util.enlivenObjects(
+              [data.data],
+              (objects) => {
+                console.log("🎯 enlivenObjects callback fired");
+
+                if (!objects || objects.length === 0) {
+                  console.warn("⚠️ No objects returned from enlivenObjects. Input was:", data.data);
+                  return;
+                }
+
+                console.log("📐 Enlivened objects:", objects);
+
+                objects.forEach(obj => {
+                  obj.id = data.data.id;
+                  fabricCanvas.add(obj);
+                });
+
+                fabricCanvas.renderAll();
+                console.log("✅ Object added and canvas rendered");
+              },
+              null, // no reviver
+              (error) => {
+                console.error("❌ EnlivenObjects error callback:", error);
+              }
+            );
+          } catch (err) {
+            console.error("❌ Exception during fabric import or enlivening:", err);
+          } finally {
+            setTimeout(() => {
+              isReceivingUpdateRef.current = false;
+            }, 100);
+          }
+        });
+
+        break;
+
+
+
+      case 'object:modified':
+        // Update existing object
+        const obj = fabricCanvas.getObjects().find(o => o.id === data.data.id);
+        if (obj) {
+          obj.set(data.data.changes);
+          fabricCanvas.renderAll();
+        }
+        setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
+        break;
+      case 'full-canvas':
+        // Load complete canvas state
+        fabricCanvas.loadFromJSON(data.data, () => {
+          fabricCanvas.renderAll();
+          setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
+        });
+        break;
+      default:
+        setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
+    }
+  }, [fabricCanvas]);
+
   useEffect(() => {
     if (!socket || !boardId) return;
-
+    console.log("✅ Setting up socket listeners for board:", boardId);
     // Join board room
     socket.emit('join-board', boardId);
     currentBoardRef.current = boardId;
     
     // Set up event listeners
+    console.log("📡 Registering canvas-update listener");
     socket.on('canvas-update', handleCanvasUpdate);
     socket.on('sticky-note-add', handleStickyNoteAdd);
     socket.on('sticky-note-update', handleStickyNoteUpdate);
@@ -65,7 +161,7 @@ export const Whiteboard = () => {
       socket.emit('leave-board', boardId);
       currentBoardRef.current = null;
     };
-  }, [socket, boardId]);
+  }, [socket, boardId, handleCanvasUpdate]);
 
   const fetchBoard = async () => {
     try {
@@ -143,6 +239,13 @@ export const Whiteboard = () => {
         setTimeout(() => { isReceivingUpdateRef.current = false; }, 500);
       });
     }
+
+    // Apply any updates that arrived before canvas was ready
+    if (pendingCanvasUpdates.length > 0) {
+      console.log("📦 Applying queued updates:", pendingCanvasUpdates.length);
+      pendingCanvasUpdates.forEach(update => applyCanvasUpdate(update));
+      setPendingCanvasUpdates([]); // Clear queue
+    }
   };
 
   // Set up canvas event listeners when both canvas and socket are ready
@@ -159,7 +262,7 @@ export const Whiteboard = () => {
           socket.emit('canvas-update', {
             boardId,
             type: 'path:created',
-            data: e.path.toObject()
+            data: e.path.toObject(['id'])
           });
         }
       };
@@ -206,57 +309,6 @@ export const Whiteboard = () => {
     }
   }, [fabricCanvas, socket, boardId]);
 
-  const handleCanvasUpdate = (data) => {
-    console.log('📥 Received canvas update:', data.type);
-    if (!fabricCanvas) return;
-
-    isReceivingUpdateRef.current = true;
-
-    // Handle different types of canvas updates from other users
-    switch (data.type) {
-      case 'path:created':
-        // Add path from other user (free drawing)
-        import('fabric').then(({ Path }) => {
-          const path = new Path(data.data.path, data.data);
-          path.id = data.data.id; // Preserve the ID
-          fabricCanvas.add(path);
-          fabricCanvas.renderAll();
-          setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-        });
-        break;
-      case 'object:added':
-        // Add object from other user (shapes, text, etc.)
-        import('fabric').then(({ util }) => {
-          util.enlivenObjects([data.data], (objects) => {
-            objects.forEach(obj => {
-              obj.id = data.data.id; // Preserve the ID
-              fabricCanvas.add(obj);
-            });
-            fabricCanvas.renderAll();
-            setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-          });
-        });
-        break;
-      case 'object:modified':
-        // Update existing object
-        const obj = fabricCanvas.getObjects().find(o => o.id === data.data.id);
-        if (obj) {
-          obj.set(data.data.changes);
-          fabricCanvas.renderAll();
-        }
-        setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-        break;
-      case 'full-canvas':
-        // Load complete canvas state
-        fabricCanvas.loadFromJSON(data.data, () => {
-          fabricCanvas.renderAll();
-          setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-        });
-        break;
-      default:
-        setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-    }
-  };
 
   const handleAddStickyNote = () => {
     const colors = ["yellow", "pink", "blue", "green"];
