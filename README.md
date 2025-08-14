@@ -70,7 +70,7 @@ cp .env.example .env
 
 Update the `.env` file with your configuration:
 ```env
-PORT=3001
+PORT=8000
 MONGODB_URI=mongodb://localhost:27017/whiteboard
 JWT_SECRET=your-super-secret-jwt-key-here
 CLIENT_URL=http://localhost:5173
@@ -96,7 +96,7 @@ sudo systemctl start mongod
 cd server
 npm run dev
 ```
-The server will run on http://localhost:3001
+The server will run on http://localhost:8000
 
 2. **Start the frontend development server:**
 ```bash

@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef , useCallback} from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Canvas as FabricCanvas } from "fabric";
-import { Path } from 'fabric';  // Force Path class to register
-fabric.Path = Path; 
+import { Canvas as FabricCanvas, Path, util } from "fabric"; 
 import { WhiteboardCanvas } from "./WhiteboardCanvas";
 import { Toolbar } from "./Toolbar";
 import { ChatWindow } from "./ChatWindow";
@@ -63,11 +61,10 @@ export const Whiteboard = () => {
         console.log("📥 Received canvas update:", data.type);
         console.log("🔎 Raw object data:", data.data);
 
-        import('fabric').then((fabric) => {
-          try {
-            console.log("📦 Fabric module loaded");
+        try {
+          console.log("📦 Fabric module loaded");
 
-            const { util } = fabric;
+          // Use the imported util directly
 
             console.log("🔎 Object type:", data.data?.type);
             console.log("🧩 Object keys:", Object.keys(data.data));
@@ -97,14 +94,13 @@ export const Whiteboard = () => {
                 console.error("❌ EnlivenObjects error callback:", error);
               }
             );
-          } catch (err) {
-            console.error("❌ Exception during fabric import or enlivening:", err);
-          } finally {
-            setTimeout(() => {
-              isReceivingUpdateRef.current = false;
-            }, 100);
-          }
-        });
+        } catch (err) {
+          console.error("❌ Exception during fabric import or enlivening:", err);
+        } finally {
+          setTimeout(() => {
+            isReceivingUpdateRef.current = false;
+          }, 100);
+        }
 
         break;
 
