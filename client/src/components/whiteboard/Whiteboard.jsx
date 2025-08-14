@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef , useCallback} from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Canvas as FabricCanvas, Path, util } from "fabric"; 
+import { Canvas as FabricCanvas, Path, util } from "fabric";
 import { WhiteboardCanvas } from "./WhiteboardCanvas";
 import { Toolbar } from "./Toolbar";
 import { ChatWindow } from "./ChatWindow";
@@ -17,7 +17,7 @@ export const Whiteboard = () => {
   const navigate = useNavigate();
   const { token } = useAuth();
   const { socket } = useSocket();
-  
+
   const [activeTool, setActiveTool] = useState("select");
   const [activeColor, setActiveColor] = useState("#000000");
   const [brushSize, setBrushSize] = useState(2);
@@ -37,158 +37,176 @@ export const Whiteboard = () => {
     }
   }, [boardId]);
 
-  const handleCanvasUpdate = useCallback((data) => {
-    if (!fabricCanvas) {
-      console.warn("⚠️ Canvas not ready. Queuing update:", data);
-      setPendingCanvasUpdates(prev => [...prev, data]);
-      return;
-    }
-  
-    applyCanvasUpdate(data);
-  }, [fabricCanvas]);
-  
+  const handleCanvasUpdate = useCallback(
+    (data) => {
+      if (!fabricCanvas) {
+        console.warn("⚠️ Canvas not ready. Queuing update:", data);
+        setPendingCanvasUpdates((prev) => [...prev, data]);
+        return;
+      }
 
-  const applyCanvasUpdate = useCallback((data) => {
-    console.log('📥 Received canvas update:', data.type);
-    if (!fabricCanvas) return;
+      applyCanvasUpdate(data);
+    },
+    [fabricCanvas]
+  );
 
-    isReceivingUpdateRef.current = true;
+  const applyCanvasUpdate = useCallback(
+    (data) => {
+      console.log("📥 Received canvas update:", data.type);
+      if (!fabricCanvas) return;
 
-    // Handle different types of canvas updates from other users
-    switch (data.type) {
-      case 'path:created':
-      case 'object:added':
-        console.log("📥 Received canvas update:", data.type);
-        console.log("🔎 Raw object data:", data.data);
+      isReceivingUpdateRef.current = true;
 
-        try {
-          console.log("📦 Fabric module loaded");
+      // Handle different types of canvas updates from other users
+      switch (data.type) {
+        case "path:created":
+        case "object:added":
+          console.log("📥 Received canvas update:", data.type);
+          console.log("🔎 Raw object data:", data.data);
 
-          // Use the imported util directly
-
+          try {
+            console.log("📦 Fabric module loaded");
             console.log("🔎 Object type:", data.data?.type);
             console.log("🧩 Object keys:", Object.keys(data.data));
 
-            util.enlivenObjects(
-              [data.data],
-              (objects) => {
+            // Create object directly based on type
+            let fabricObject = null;
+
+            if (data.data.type === "Path") {
+              console.log("🎨 Creating Path object");
+              fabricObject = new Path(data.data.path, data.data);
+            } else {
+              console.log("🔄 Using util.enlivenObjects for non-path object");
+              util.enlivenObjects([data.data], (objects) => {
                 console.log("🎯 enlivenObjects callback fired");
-
-                if (!objects || objects.length === 0) {
-                  console.warn("⚠️ No objects returned from enlivenObjects. Input was:", data.data);
-                  return;
-                }
-
-                console.log("📐 Enlivened objects:", objects);
-
-                objects.forEach(obj => {
+                if (objects && objects.length > 0) {
+                  const obj = objects[0];
                   obj.id = data.data.id;
                   fabricCanvas.add(obj);
-                });
+                  fabricCanvas.renderAll();
+                  console.log("✅ Object added and canvas rendered");
+                }
+              });
+              return; // Exit early for non-path objects
+            }
 
-                fabricCanvas.renderAll();
-                console.log("✅ Object added and canvas rendered");
-              },
-              null, // no reviver
-              (error) => {
-                console.error("❌ EnlivenObjects error callback:", error);
-              }
+            if (fabricObject) {
+              fabricObject.id = data.data.id;
+              fabricCanvas.add(fabricObject);
+              fabricCanvas.renderAll();
+              console.log("✅ Path object added and canvas rendered");
+            }
+          } catch (err) {
+            console.error(
+              "❌ Exception during fabric import or enlivening:",
+              err
             );
-        } catch (err) {
-          console.error("❌ Exception during fabric import or enlivening:", err);
-        } finally {
+          } finally {
+            setTimeout(() => {
+              isReceivingUpdateRef.current = false;
+            }, 100);
+          }
+
+          break;
+
+        case "object:modified":
+          // Update existing object
+          const obj = fabricCanvas
+            .getObjects()
+            .find((o) => o.id === data.data.id);
+          if (obj) {
+            obj.set(data.data.changes);
+            fabricCanvas.renderAll();
+          }
           setTimeout(() => {
             isReceivingUpdateRef.current = false;
           }, 100);
-        }
-
-        break;
-
-
-
-      case 'object:modified':
-        // Update existing object
-        const obj = fabricCanvas.getObjects().find(o => o.id === data.data.id);
-        if (obj) {
-          obj.set(data.data.changes);
-          fabricCanvas.renderAll();
-        }
-        setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-        break;
-      case 'full-canvas':
-        // Load complete canvas state
-        fabricCanvas.loadFromJSON(data.data, () => {
-          fabricCanvas.renderAll();
-          setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-        });
-        break;
-      default:
-        setTimeout(() => { isReceivingUpdateRef.current = false; }, 100);
-    }
-  }, [fabricCanvas]);
+          break;
+        case "full-canvas":
+          // Load complete canvas state
+          fabricCanvas.loadFromJSON(data.data, () => {
+            fabricCanvas.renderAll();
+            setTimeout(() => {
+              isReceivingUpdateRef.current = false;
+            }, 100);
+          });
+          break;
+        default:
+          setTimeout(() => {
+            isReceivingUpdateRef.current = false;
+          }, 100);
+      }
+    },
+    [fabricCanvas]
+  );
 
   useEffect(() => {
     if (!socket || !boardId) return;
     console.log("✅ Setting up socket listeners for board:", boardId);
     // Join board room
-    socket.emit('join-board', boardId);
+    socket.emit("join-board", boardId);
     currentBoardRef.current = boardId;
-    
+
     // Set up event listeners
     console.log("📡 Registering canvas-update listener");
-    socket.on('canvas-update', handleCanvasUpdate);
-    socket.on('sticky-note-add', handleStickyNoteAdd);
-    socket.on('sticky-note-update', handleStickyNoteUpdate);
-    socket.on('sticky-note-delete', handleStickyNoteDelete);
-    socket.on('user-joined', handleUserJoined);
-    socket.on('user-left', handleUserLeft);
-    socket.on('room-users', setRoomUsers);
+    socket.on("canvas-update", handleCanvasUpdate);
+    socket.on("sticky-note-add", handleStickyNoteAdd);
+    socket.on("sticky-note-update", handleStickyNoteUpdate);
+    socket.on("sticky-note-delete", handleStickyNoteDelete);
+    socket.on("user-joined", handleUserJoined);
+    socket.on("user-left", handleUserLeft);
+    socket.on("room-users", setRoomUsers);
 
     return () => {
-      console.log('🔌 Cleaning up socket for board:', boardId);
-      socket.off('canvas-update', handleCanvasUpdate);
-      socket.off('sticky-note-add', handleStickyNoteAdd);
-      socket.off('sticky-note-update', handleStickyNoteUpdate);
-      socket.off('sticky-note-delete', handleStickyNoteDelete);
-      socket.off('user-joined', handleUserJoined);
-      socket.off('user-left', handleUserLeft);
-      socket.off('room-users', setRoomUsers);
-      
-      socket.emit('leave-board', boardId);
+      console.log("🔌 Cleaning up socket for board:", boardId);
+      socket.off("canvas-update", handleCanvasUpdate);
+      socket.off("sticky-note-add", handleStickyNoteAdd);
+      socket.off("sticky-note-update", handleStickyNoteUpdate);
+      socket.off("sticky-note-delete", handleStickyNoteDelete);
+      socket.off("user-joined", handleUserJoined);
+      socket.off("user-left", handleUserLeft);
+      socket.off("room-users", setRoomUsers);
+
+      socket.emit("leave-board", boardId);
       currentBoardRef.current = null;
     };
   }, [socket, boardId, handleCanvasUpdate]);
 
   const fetchBoard = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/boards/${boardId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      const response = await fetch(
+        `http://localhost:8000/api/boards/${boardId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         }
-      });
+      );
 
       if (response.ok) {
         const boardData = await response.json();
         setBoard(boardData);
         setStickyNotes(boardData.stickyNotes || []);
-        
+
         // Load canvas data if available
         if (boardData.canvasData && fabricCanvas) {
-          console.log('Loading canvas data from database');
+          console.log("Loading canvas data from database");
           isReceivingUpdateRef.current = true;
           fabricCanvas.loadFromJSON(boardData.canvasData, () => {
             fabricCanvas.renderAll();
-            setTimeout(() => { isReceivingUpdateRef.current = false; }, 500);
+            setTimeout(() => {
+              isReceivingUpdateRef.current = false;
+            }, 500);
           });
         }
       } else {
-        toast.error('Failed to load board');
-        navigate('/dashboard');
+        toast.error("Failed to load board");
+        navigate("/dashboard");
       }
     } catch (error) {
-      console.error('Error fetching board:', error);
-      toast.error('Network error');
-      navigate('/dashboard');
+      console.error("Error fetching board:", error);
+      toast.error("Network error");
+      navigate("/dashboard");
     } finally {
       setLoading(false);
     }
@@ -199,20 +217,20 @@ export const Whiteboard = () => {
 
     try {
       const canvasData = fabricCanvas.toJSON();
-      
+
       await fetch(`http://localhost:8000/api/boards/${boardId}`, {
-        method: 'PUT',
+        method: "PUT",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           canvasData,
-          stickyNotes
-        })
+          stickyNotes,
+        }),
       });
     } catch (error) {
-      console.error('Error saving board:', error);
+      console.error("Error saving board:", error);
     }
   };
 
@@ -223,23 +241,25 @@ export const Whiteboard = () => {
   }, [fabricCanvas, stickyNotes]);
 
   const handleCanvasReady = (canvas) => {
-    console.log('Canvas ready, setting up event listeners');
+    console.log("Canvas ready, setting up event listeners");
     setFabricCanvas(canvas);
-    
+
     // Load existing canvas data if available
     if (board?.canvasData) {
-      console.log('Loading existing canvas data');
+      console.log("Loading existing canvas data");
       isReceivingUpdateRef.current = true;
       canvas.loadFromJSON(board.canvasData, () => {
         canvas.renderAll();
-        setTimeout(() => { isReceivingUpdateRef.current = false; }, 500);
+        setTimeout(() => {
+          isReceivingUpdateRef.current = false;
+        }, 500);
       });
     }
 
     // Apply any updates that arrived before canvas was ready
     if (pendingCanvasUpdates.length > 0) {
       console.log("📦 Applying queued updates:", pendingCanvasUpdates.length);
-      pendingCanvasUpdates.forEach(update => applyCanvasUpdate(update));
+      pendingCanvasUpdates.forEach((update) => applyCanvasUpdate(update));
       setPendingCanvasUpdates([]); // Clear queue
     }
   };
@@ -247,160 +267,160 @@ export const Whiteboard = () => {
   // Set up canvas event listeners when both canvas and socket are ready
   useEffect(() => {
     if (fabricCanvas && socket && boardId) {
-      console.log('Setting up canvas event listeners with socket');
-      
+      console.log("Setting up canvas event listeners with socket");
+
       const handlePathCreated = (e) => {
-        console.log('🎨 Broadcasting canvas update, socket:', !!socket, 'boardId:', boardId);
+        console.log(
+          "🎨 Broadcasting canvas update, socket:",
+          !!socket,
+          "boardId:",
+          boardId
+        );
         if (!isReceivingUpdateRef.current) {
           // Assign unique ID to the path
           e.path.id = Date.now() + Math.random();
-          
-          socket.emit('canvas-update', {
+
+          socket.emit("canvas-update", {
             boardId,
-            type: 'path:created',
-            data: e.path.toObject(['id'])
+            type: "path:created",
+            data: e.path.toObject(["id"]),
           });
         }
       };
 
       const handleObjectAdded = (e) => {
-        if (e.target.type !== 'path' && !isReceivingUpdateRef.current) {
+        if (e.target.type !== "path" && !isReceivingUpdateRef.current) {
           // Assign unique ID if not already present
           if (!e.target.id) {
             e.target.id = Date.now() + Math.random();
           }
-          
-          socket.emit('canvas-update', {
+
+          socket.emit("canvas-update", {
             boardId,
-            type: 'object:added',
-            data: e.target.toObject()
+            type: "object:added",
+            data: e.target.toObject(),
           });
         }
       };
 
       const handleObjectModified = (e) => {
         if (e.target.id && !isReceivingUpdateRef.current) {
-          socket.emit('canvas-update', {
+          socket.emit("canvas-update", {
             boardId,
-            type: 'object:modified',
+            type: "object:modified",
             data: {
               id: e.target.id,
-              changes: e.target.toObject()
-            }
+              changes: e.target.toObject(),
+            },
           });
         }
       };
 
       // Add event listeners
-      fabricCanvas.on('path:created', handlePathCreated);
-      fabricCanvas.on('object:added', handleObjectAdded);
-      fabricCanvas.on('object:modified', handleObjectModified);
+      fabricCanvas.on("path:created", handlePathCreated);
+      fabricCanvas.on("object:added", handleObjectAdded);
+      fabricCanvas.on("object:modified", handleObjectModified);
 
       // Cleanup function
       return () => {
-        fabricCanvas.off('path:created', handlePathCreated);
-        fabricCanvas.off('object:added', handleObjectAdded);
-        fabricCanvas.off('object:modified', handleObjectModified);
+        fabricCanvas.off("path:created", handlePathCreated);
+        fabricCanvas.off("object:added", handleObjectAdded);
+        fabricCanvas.off("object:modified", handleObjectModified);
       };
     }
   }, [fabricCanvas, socket, boardId]);
 
-
   const handleAddStickyNote = () => {
     const colors = ["yellow", "pink", "blue", "green"];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
-    
+
     const newNote = {
       id: Date.now().toString(),
       text: "",
       color: randomColor,
-      position: { 
-        x: Math.random() * (window.innerWidth - 600) + 100, 
-        y: Math.random() * (window.innerHeight - 300) + 100 
+      position: {
+        x: Math.random() * (window.innerWidth - 600) + 100,
+        y: Math.random() * (window.innerHeight - 300) + 100,
       },
     };
 
-    setStickyNotes(prev => [...prev, newNote]);
-    
+    setStickyNotes((prev) => [...prev, newNote]);
+
     if (socket) {
-      socket.emit('sticky-note-add', {
+      socket.emit("sticky-note-add", {
         boardId,
-        note: newNote
+        note: newNote,
       });
     }
-    
+
     toast.success("Sticky note added!");
   };
 
   const handleStickyNoteAdd = (data) => {
-    setStickyNotes(prev => [...prev, data.note]);
+    setStickyNotes((prev) => [...prev, data.note]);
   };
 
   const handleUpdateStickyNote = (id, text) => {
-    setStickyNotes(prev => 
-      prev.map(note => 
-        note.id === id ? { ...note, text } : note
-      )
+    setStickyNotes((prev) =>
+      prev.map((note) => (note.id === id ? { ...note, text } : note))
     );
 
     if (socket) {
-      socket.emit('sticky-note-update', {
+      socket.emit("sticky-note-update", {
         boardId,
         noteId: id,
-        text
+        text,
       });
     }
   };
 
   const handleStickyNoteUpdate = (data) => {
-    setStickyNotes(prev => 
-      prev.map(note => 
+    setStickyNotes((prev) =>
+      prev.map((note) =>
         note.id === data.noteId ? { ...note, text: data.text } : note
       )
     );
   };
 
   const handleDeleteStickyNote = (id) => {
-    setStickyNotes(prev => prev.filter(note => note.id !== id));
-    
+    setStickyNotes((prev) => prev.filter((note) => note.id !== id));
+
     if (socket) {
-      socket.emit('sticky-note-delete', {
+      socket.emit("sticky-note-delete", {
         boardId,
-        noteId: id
+        noteId: id,
       });
     }
-    
+
     toast.success("Sticky note deleted!");
   };
 
   const handleStickyNoteDelete = (data) => {
-    setStickyNotes(prev => prev.filter(note => note.id !== data.noteId));
+    setStickyNotes((prev) => prev.filter((note) => note.id !== data.noteId));
   };
 
   const handleMoveStickyNote = (id, position) => {
-    setStickyNotes(prev => 
-      prev.map(note => 
-        note.id === id ? { ...note, position } : note
-      )
+    setStickyNotes((prev) =>
+      prev.map((note) => (note.id === id ? { ...note, position } : note))
     );
   };
 
   const handleUserJoined = (user) => {
-    console.log('User joined event received:', user.username);
-    setRoomUsers(prev => [...prev, user]);
+    console.log("User joined event received:", user.username);
+    setRoomUsers((prev) => [...prev, user]);
     toast.success(`${user.username} joined the board`);
   };
 
   const handleUserLeft = (user) => {
-    console.log('User left event received:', user.username);
-    setRoomUsers(prev => prev.filter(u => u.userId !== user.userId));
+    console.log("User left event received:", user.username);
+    setRoomUsers((prev) => prev.filter((u) => u.userId !== user.userId));
     toast.info(`${user.username} left the board`);
   };
 
   const copyShareCode = () => {
     if (board?.shareCode) {
       navigator.clipboard.writeText(board.shareCode);
-      toast.success('Share code copied to clipboard!');
+      toast.success("Share code copied to clipboard!");
     }
   };
 
@@ -417,16 +437,22 @@ export const Whiteboard = () => {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 py-2">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/dashboard")}
+          >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Dashboard
           </Button>
           <div>
             <h1 className="font-semibold">{board?.title}</h1>
-            <p className="text-sm text-muted-foreground">{board?.description}</p>
+            <p className="text-sm text-muted-foreground">
+              {board?.description}
+            </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-4">
           <Button variant="outline" size="sm" onClick={copyShareCode}>
             <Share2 className="h-4 w-4 mr-2" />
@@ -462,7 +488,7 @@ export const Whiteboard = () => {
 
           {/* Sticky Notes */}
           <div className="absolute inset-0 pointer-events-none z-10">
-            {stickyNotes.map(note => (
+            {stickyNotes.map((note) => (
               <div key={note.id} className="pointer-events-auto">
                 <StickyNote
                   id={note.id}
